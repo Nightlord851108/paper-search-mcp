@@ -1,6 +1,13 @@
 # paper_search_mcp/server.py
 from typing import List, Dict, Optional
 import httpx
+import asyncio
+import logging
+import os
+import json
+from datetime import datetime
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 from mcp.server.fastmcp import FastMCP
 from .academic_platforms.arxiv import ArxivSearcher
 from .academic_platforms.pubmed import PubMedSearcher
@@ -14,8 +21,15 @@ from .academic_platforms.crossref import CrossRefSearcher
 # from .academic_platforms.hub import SciHubSearcher
 from .paper import Paper
 
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 # Initialize MCP server
 mcp = FastMCP("paper_search_server")
+
+# Initialize Flask app for HTTP transport
+app = Flask(__name__)
+CORS(app)
 
 # Instances of searchers
 arxiv_searcher = ArxivSearcher()
@@ -430,5 +444,295 @@ async def read_crossref_paper(paper_id: str, save_path: str = "./downloads") -> 
     return crossref_searcher.read_paper(paper_id, save_path)
 
 
+# HTTP endpoints for MCP JSON-RPC
+@app.route('/ready', methods=['GET'])
+def ready():
+    return jsonify({
+        "status": "ready",
+        "timestamp": datetime.now().isoformat(),
+        "service": "paper-search-mcp-server"
+    })
+
+@app.route('/', methods=['GET', 'POST', 'OPTIONS'])
+def handle_request():
+    if request.method == 'GET':
+        # Health check endpoint
+        return jsonify({
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "service": "paper-search-mcp-server",
+            "version": "0.1.3"
+        })
+    elif request.method == 'OPTIONS':
+        return '', 204
+
+    try:
+        data = request.get_json()
+        method = data.get('method')
+        params = data.get('params', {})
+        request_id = data.get('id')
+
+        logging.info(f"HTTP MCP request: {method}")
+
+        if method == "initialize":
+            response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "paper-search-server",
+                        "version": "0.1.3"
+                    }
+                }
+            }
+        elif method == "notifications/initialized":
+            return '', 204
+        elif method == "tools/list":
+            response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "tools": [
+                        {
+                            "name": "search_arxiv",
+                            "description": "Search academic papers from arXiv",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "Search query string"},
+                                    "max_results": {"type": "integer", "description": "Maximum number of papers to return (default: 10)", "default": 10}
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "search_pubmed",
+                            "description": "Search academic papers from PubMed",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "Search query string"},
+                                    "max_results": {"type": "integer", "description": "Maximum number of papers to return (default: 10)", "default": 10}
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "search_biorxiv",
+                            "description": "Search academic papers from bioRxiv",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "Search query string"},
+                                    "max_results": {"type": "integer", "description": "Maximum number of papers to return (default: 10)", "default": 10}
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "search_medrxiv",
+                            "description": "Search academic papers from medRxiv",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "Search query string"},
+                                    "max_results": {"type": "integer", "description": "Maximum number of papers to return (default: 10)", "default": 10}
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "search_google_scholar",
+                            "description": "Search academic papers from Google Scholar",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "Search query string"},
+                                    "max_results": {"type": "integer", "description": "Maximum number of papers to return (default: 10)", "default": 10}
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "search_iacr",
+                            "description": "Search academic papers from IACR ePrint Archive",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "Search query string"},
+                                    "max_results": {"type": "integer", "description": "Maximum number of papers to return (default: 10)", "default": 10},
+                                    "fetch_details": {"type": "boolean", "description": "Whether to fetch detailed information (default: true)", "default": True}
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "search_semantic",
+                            "description": "Search academic papers from Semantic Scholar",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "Search query string"},
+                                    "year": {"type": "string", "description": "Optional year filter (e.g., '2019', '2016-2020')"},
+                                    "max_results": {"type": "integer", "description": "Maximum number of papers to return (default: 10)", "default": 10}
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "search_crossref",
+                            "description": "Search academic papers from CrossRef database",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "Search query string"},
+                                    "max_results": {"type": "integer", "description": "Maximum number of papers to return (default: 10)", "default": 10}
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "get_crossref_paper_by_doi",
+                            "description": "Get a specific paper from CrossRef by its DOI",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "doi": {"type": "string", "description": "Digital Object Identifier"}
+                                },
+                                "required": ["doi"]
+                            }
+                        },
+                        {
+                            "name": "download_arxiv",
+                            "description": "Download PDF of an arXiv paper",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "paper_id": {"type": "string", "description": "arXiv paper ID"},
+                                    "save_path": {"type": "string", "description": "Directory to save the PDF (default: './downloads')", "default": "./downloads"}
+                                },
+                                "required": ["paper_id"]
+                            }
+                        },
+                        {
+                            "name": "read_arxiv_paper",
+                            "description": "Read and extract text content from an arXiv paper PDF",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "paper_id": {"type": "string", "description": "arXiv paper ID"},
+                                    "save_path": {"type": "string", "description": "Directory where the PDF is/will be saved (default: './downloads')", "default": "./downloads"}
+                                },
+                                "required": ["paper_id"]
+                            }
+                        }
+                    ]
+                }
+            }
+        elif method == "tools/call":
+            tool_name = params.get('name')
+            tool_args = params.get('arguments', {})
+            result = None
+
+            if tool_name == "search_arxiv":
+                result = await search_arxiv(
+                    tool_args.get('query'),
+                    tool_args.get('max_results', 10)
+                )
+            elif tool_name == "search_pubmed":
+                result = await search_pubmed(
+                    tool_args.get('query'),
+                    tool_args.get('max_results', 10)
+                )
+            elif tool_name == "search_biorxiv":
+                result = await search_biorxiv(
+                    tool_args.get('query'),
+                    tool_args.get('max_results', 10)
+                )
+            elif tool_name == "search_medrxiv":
+                result = await search_medrxiv(
+                    tool_args.get('query'),
+                    tool_args.get('max_results', 10)
+                )
+            elif tool_name == "search_google_scholar":
+                result = await search_google_scholar(
+                    tool_args.get('query'),
+                    tool_args.get('max_results', 10)
+                )
+            elif tool_name == "search_iacr":
+                result = await search_iacr(
+                    tool_args.get('query'),
+                    tool_args.get('max_results', 10),
+                    tool_args.get('fetch_details', True)
+                )
+            elif tool_name == "search_semantic":
+                result = await search_semantic(
+                    tool_args.get('query'),
+                    tool_args.get('year'),
+                    tool_args.get('max_results', 10)
+                )
+            elif tool_name == "search_crossref":
+                result = await search_crossref(
+                    tool_args.get('query'),
+                    tool_args.get('max_results', 10)
+                )
+            elif tool_name == "get_crossref_paper_by_doi":
+                result = await get_crossref_paper_by_doi(tool_args.get('doi'))
+            elif tool_name == "download_arxiv":
+                result = await download_arxiv(
+                    tool_args.get('paper_id'),
+                    tool_args.get('save_path', './downloads')
+                )
+            elif tool_name == "read_arxiv_paper":
+                result = await read_arxiv_paper(
+                    tool_args.get('paper_id'),
+                    tool_args.get('save_path', './downloads')
+                )
+            else:
+                raise Exception(f"Unknown tool: {tool_name}")
+
+            response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]
+                }
+            }
+        else:
+            response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32601,
+                    "message": "Method not found"
+                }
+            }
+
+        return jsonify(response)
+
+    except Exception as e:
+        logging.error(f"HTTP MCP request error: {e}")
+        return jsonify({
+            "jsonrpc": "2.0",
+            "id": request.get_json().get('id') if request.get_json() else None,
+            "error": {
+                "code": -32603,
+                "message": "Internal error",
+                "data": str(e)
+            }
+        }), 500
+
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    transport_type = os.environ.get("MCP_TRANSPORT", "stdio")
+    port = int(os.environ.get("PORT", 3000))
+
+    if transport_type == "http":
+        logging.info(f"Starting Paper Search MCP server on HTTP port {port}")
+        app.run(host='0.0.0.0', port=port, debug=False)
+    else:
+        logging.info("Starting Paper Search MCP server on stdio")
+        mcp.run(transport="stdio")

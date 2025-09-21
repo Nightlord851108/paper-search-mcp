@@ -18,6 +18,9 @@ A Model Context Protocol (MCP) server for searching and downloading academic pap
   - [For Development](#for-development)
     - [Setup Environment](#setup-environment)
     - [Install Dependencies](#install-dependencies)
+- [HTTP Service](#http-service)
+  - [Running HTTP Server](#running-http-server)
+  - [ChatGPT Integration](#chatgpt-integration)
 - [Contributing](#contributing)
 - [Demo](#demo)
 - [License](#license)
@@ -114,6 +117,92 @@ For developers who want to modify the code or contribute:
    # Add development dependencies (optional)
    uv add pytest flake8
    ```
+
+---
+
+## HTTP Service
+
+`paper-search-mcp` supports both stdio and HTTP transport modes, making it compatible with ChatGPT and other HTTP-based clients.
+
+### Running HTTP Server
+
+To run the server in HTTP mode:
+
+1. **Set Environment Variable**:
+   ```bash
+   export MCP_TRANSPORT=http
+   export PORT=3000  # Optional: defaults to 3000
+   ```
+
+2. **Start the Server**:
+   ```bash
+   # Using uv
+   uv run -m paper_search_mcp.server
+
+   # Or with python directly
+   python -m paper_search_mcp.server
+   ```
+
+3. **Test the Server**:
+   ```bash
+   # Health check
+   curl http://localhost:3000
+
+   # Ready check
+   curl http://localhost:3000/ready
+   ```
+
+### ChatGPT Integration
+
+To integrate with ChatGPT:
+
+1. **Deploy to a Server**: Deploy the HTTP server to a cloud service (like Railway, Heroku, or AWS).
+
+2. **Create GPT Action**: In ChatGPT, create a custom GPT with the following action schema:
+
+   ```yaml
+   openapi: 3.0.0
+   info:
+     title: Paper Search MCP
+     version: 1.0.0
+   servers:
+     - url: https://your-deployed-server.com
+   paths:
+     /:
+       post:
+         summary: Execute MCP tool
+         requestBody:
+           content:
+             application/json:
+               schema:
+                 type: object
+                 properties:
+                   jsonrpc:
+                     type: string
+                     enum: ["2.0"]
+                   method:
+                     type: string
+                     enum: ["tools/call"]
+                   params:
+                     type: object
+                     properties:
+                       name:
+                         type: string
+                         enum: ["search_arxiv", "search_pubmed", "search_biorxiv", "search_medrxiv", "search_google_scholar", "search_iacr", "search_semantic", "search_crossref", "download_arxiv", "read_arxiv_paper"]
+                       arguments:
+                         type: object
+                   id:
+                     type: string
+                 required: ["jsonrpc", "method", "params", "id"]
+         responses:
+           '200':
+             description: Successful response
+   ```
+
+3. **Example Usage in ChatGPT**:
+   - "Search for machine learning papers on arXiv"
+   - "Find recent papers about neural networks from PubMed"
+   - "Download and read the arXiv paper 2106.15928"
 
 ---
 
