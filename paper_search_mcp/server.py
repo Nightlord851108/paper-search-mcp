@@ -639,59 +639,59 @@ def handle_request():
             result = None
 
             if tool_name == "search_arxiv":
-                result = await search_arxiv(
+                result = asyncio.run(search_arxiv(
                     tool_args.get('query'),
                     tool_args.get('max_results', 10)
-                )
+                ))
             elif tool_name == "search_pubmed":
-                result = await search_pubmed(
+                result = asyncio.run(search_pubmed(
                     tool_args.get('query'),
                     tool_args.get('max_results', 10)
-                )
+                ))
             elif tool_name == "search_biorxiv":
-                result = await search_biorxiv(
+                result = asyncio.run(search_biorxiv(
                     tool_args.get('query'),
                     tool_args.get('max_results', 10)
-                )
+                ))
             elif tool_name == "search_medrxiv":
-                result = await search_medrxiv(
+                result = asyncio.run(search_medrxiv(
                     tool_args.get('query'),
                     tool_args.get('max_results', 10)
-                )
+                ))
             elif tool_name == "search_google_scholar":
-                result = await search_google_scholar(
+                result = asyncio.run(search_google_scholar(
                     tool_args.get('query'),
                     tool_args.get('max_results', 10)
-                )
+                ))
             elif tool_name == "search_iacr":
-                result = await search_iacr(
+                result = asyncio.run(search_iacr(
                     tool_args.get('query'),
                     tool_args.get('max_results', 10),
                     tool_args.get('fetch_details', True)
-                )
+                ))
             elif tool_name == "search_semantic":
-                result = await search_semantic(
+                result = asyncio.run(search_semantic(
                     tool_args.get('query'),
                     tool_args.get('year'),
                     tool_args.get('max_results', 10)
-                )
+                ))
             elif tool_name == "search_crossref":
-                result = await search_crossref(
+                result = asyncio.run(search_crossref(
                     tool_args.get('query'),
                     tool_args.get('max_results', 10)
-                )
+                ))
             elif tool_name == "get_crossref_paper_by_doi":
-                result = await get_crossref_paper_by_doi(tool_args.get('doi'))
+                result = asyncio.run(get_crossref_paper_by_doi(tool_args.get('doi')))
             elif tool_name == "download_arxiv":
-                result = await download_arxiv(
+                result = asyncio.run(download_arxiv(
                     tool_args.get('paper_id'),
                     tool_args.get('save_path', './downloads')
-                )
+                ))
             elif tool_name == "read_arxiv_paper":
-                result = await read_arxiv_paper(
+                result = asyncio.run(read_arxiv_paper(
                     tool_args.get('paper_id'),
                     tool_args.get('save_path', './downloads')
-                )
+                ))
             else:
                 raise Exception(f"Unknown tool: {tool_name}")
 
