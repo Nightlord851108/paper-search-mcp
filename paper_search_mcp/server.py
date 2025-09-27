@@ -1,5 +1,5 @@
 # paper_search_mcp/server.py
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import httpx
 import asyncio
 import logging
@@ -33,7 +33,7 @@ app = Flask(__name__)
 CORS(app)
 
 # In-memory storage for search results (simulating OpenAI Vector Storage)
-search_cache: Dict[str, Dict[str, any]] = {}
+search_cache: Dict[str, Dict[str, Any]] = {}
 
 # Instances of searchers
 arxiv_searcher = ArxivSearcher()
@@ -78,7 +78,7 @@ def store_search_results(results: List[Dict], query: str, source: str = "multi")
 
 # Standard MCP search tools (ChatGPT compatible)
 @mcp.tool()
-async def search(query: str, max_results: int = 10) -> Dict[str, any]:
+async def search(query: str, max_results: int = 10) -> Dict[str, Any]:
     """
     Primary search tool that returns object IDs for academic papers (OpenAI MCP standard).
     This tool searches across multiple academic platforms and returns unified results.
@@ -152,7 +152,7 @@ async def search(query: str, max_results: int = 10) -> Dict[str, any]:
         }
 
 @mcp.tool()
-async def fetch(id: str) -> Dict[str, any]:
+async def fetch(id: str) -> Dict[str, Any]:
     """
     Fetch detailed paper information using object ID (OpenAI MCP standard).
 
@@ -173,7 +173,7 @@ async def fetch(id: str) -> Dict[str, any]:
         }
 
 @mcp.tool()
-async def search_cached(query_terms: str, limit: int = 5) -> List[Dict[str, any]]:
+async def search_cached(query_terms: str, limit: int = 5) -> List[Dict[str, Any]]:
     """
     Search through cached results for specific terms.
     Useful for filtering already retrieved papers.
