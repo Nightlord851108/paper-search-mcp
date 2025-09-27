@@ -5,6 +5,7 @@ import asyncio
 import logging
 import os
 import json
+import hashlib
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -31,6 +32,9 @@ mcp = FastMCP("paper_search_server")
 app = Flask(__name__)
 CORS(app)
 
+# In-memory storage for search results (simulating OpenAI Vector Storage)
+search_cache: Dict[str, Dict[str, any]] = {}
+
 # Instances of searchers
 arxiv_searcher = ArxivSearcher()
 pubmed_searcher = PubMedSearcher()
@@ -41,6 +45,165 @@ iacr_searcher = IACRSearcher()
 semantic_searcher = SemanticSearcher()
 crossref_searcher = CrossRefSearcher()
 # scihub_searcher = SciHubSearcher()
+
+def generate_object_id(content: str) -> str:
+    """Generate a unique ID for content using hash"""
+    return hashlib.md5(content.encode()).hexdigest()[:12]
+
+def store_search_results(results: List[Dict], query: str, source: str = "multi") -> List[str]:
+    """Store search results and return list of object IDs"""
+    object_ids = []
+    for result in results:
+        content_key = f"{result.get('title', '')}-{result.get('authors', '')}-{source}"
+        obj_id = generate_object_id(content_key)
+
+        # Store with enhanced metadata for better search
+        search_cache[obj_id] = {
+            "id": obj_id,
+            "title": result.get("title", ""),
+            "authors": result.get("authors", ""),
+            "abstract": result.get("abstract", ""),
+            "url": result.get("url", ""),
+            "doi": result.get("doi", ""),
+            "publication_date": result.get("publication_date", ""),
+            "source": source,
+            "query_used": query,
+            "stored_at": datetime.now().isoformat(),
+            "type": "academic_paper",
+            "relevance_score": len(results) - len(object_ids)  # Simple scoring
+        }
+        object_ids.append(obj_id)
+
+    return object_ids
+
+# Standard MCP search tools (ChatGPT compatible)
+@mcp.tool()
+async def search(query: str, max_results: int = 10) -> Dict[str, any]:
+    """
+    Primary search tool that returns object IDs for academic papers (OpenAI MCP standard).
+    This tool searches across multiple academic platforms and returns unified results.
+
+    Args:
+        query: Search query string
+        max_results: Maximum number of results to return (default: 10)
+
+    Returns:
+        Dictionary containing object IDs and search metadata
+    """
+    logging.info(f"MCP Search tool called with query: {query}, max_results: {max_results}")
+
+    try:
+        all_results = []
+
+        # Search across multiple platforms
+        try:
+            arxiv_results = await async_search(arxiv_searcher, query, min(max_results, 3))
+            for result in arxiv_results:
+                result['source'] = 'arxiv'
+            all_results.extend(arxiv_results)
+        except Exception as e:
+            logging.warning(f"ArXiv search failed: {e}")
+
+        try:
+            semantic_results = await async_search(semantic_searcher, query, min(max_results, 3))
+            for result in semantic_results:
+                result['source'] = 'semantic_scholar'
+            all_results.extend(semantic_results)
+        except Exception as e:
+            logging.warning(f"Semantic Scholar search failed: {e}")
+
+        try:
+            crossref_results = await async_search(crossref_searcher, query, min(max_results, 4))
+            for result in crossref_results:
+                result['source'] = 'crossref'
+            all_results.extend(crossref_results)
+        except Exception as e:
+            logging.warning(f"CrossRef search failed: {e}")
+
+        # Limit results and remove duplicates
+        all_results = all_results[:max_results]
+
+        if not all_results:
+            return {
+                "object_ids": [],
+                "query": query,
+                "total_results": 0,
+                "error": "No results found across all platforms"
+            }
+
+        # Store results and get object IDs
+        object_ids = store_search_results(all_results, query, "multi_platform")
+
+        return {
+            "object_ids": object_ids,
+            "query": query,
+            "total_results": len(object_ids),
+            "search_timestamp": datetime.now().isoformat(),
+            "sources_searched": ["arxiv", "semantic_scholar", "crossref"]
+        }
+
+    except Exception as e:
+        logging.error(f"Error in search tool: {str(e)}")
+        return {
+            "object_ids": [],
+            "query": query,
+            "total_results": 0,
+            "error": f"Search failed: {str(e)}"
+        }
+
+@mcp.tool()
+async def fetch(id: str) -> Dict[str, any]:
+    """
+    Fetch detailed paper information using object ID (OpenAI MCP standard).
+
+    Args:
+        id: Object ID to retrieve
+
+    Returns:
+        Detailed paper information
+    """
+    logging.info(f"MCP Fetch tool called with id: {id}")
+
+    if id in search_cache:
+        return search_cache[id]
+    else:
+        return {
+            "id": id,
+            "error": f"Object ID {id} not found in cache"
+        }
+
+@mcp.tool()
+async def search_cached(query_terms: str, limit: int = 5) -> List[Dict[str, any]]:
+    """
+    Search through cached results for specific terms.
+    Useful for filtering already retrieved papers.
+
+    Args:
+        query_terms: Terms to search for in cached results
+        limit: Maximum number of results to return
+
+    Returns:
+        List of matching cached papers
+    """
+    logging.info(f"Searching cached results for: {query_terms}")
+
+    matching_results = []
+    query_lower = query_terms.lower()
+
+    for obj_id, paper in search_cache.items():
+        # Search in title, abstract, and authors
+        searchable_text = f"{paper.get('title', '')} {paper.get('abstract', '')} {paper.get('authors', '')}".lower()
+
+        if query_lower in searchable_text:
+            matching_results.append(paper)
+
+        if len(matching_results) >= limit:
+            break
+
+    # Sort by relevance score (higher is better)
+    matching_results.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
+
+    return matching_results[:limit]
 
 
 # Asynchronous helper to adapt synchronous searchers
@@ -498,6 +661,41 @@ def handle_request():
                 "result": {
                     "tools": [
                         {
+                            "name": "search",
+                            "description": "Primary search tool that returns object IDs for academic papers (OpenAI MCP standard)",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "Search query string"},
+                                    "max_results": {"type": "integer", "description": "Maximum number of results to return (default: 10)", "default": 10}
+                                },
+                                "required": ["query"]
+                            }
+                        },
+                        {
+                            "name": "fetch",
+                            "description": "Fetch detailed paper information using object ID (OpenAI MCP standard)",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {"type": "string", "description": "Object ID to retrieve"}
+                                },
+                                "required": ["id"]
+                            }
+                        },
+                        {
+                            "name": "search_cached",
+                            "description": "Search through cached results for specific terms",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query_terms": {"type": "string", "description": "Terms to search for in cached results"},
+                                    "limit": {"type": "integer", "description": "Maximum number of results to return (default: 5)", "default": 5}
+                                },
+                                "required": ["query_terms"]
+                            }
+                        },
+                        {
                             "name": "search_arxiv",
                             "description": "Search academic papers from arXiv",
                             "inputSchema": {
@@ -638,7 +836,19 @@ def handle_request():
             tool_args = params.get('arguments', {})
             result = None
 
-            if tool_name == "search_arxiv":
+            if tool_name == "search":
+                result = asyncio.run(search(
+                    tool_args.get('query'),
+                    tool_args.get('max_results', 10)
+                ))
+            elif tool_name == "fetch":
+                result = asyncio.run(fetch(tool_args.get('id')))
+            elif tool_name == "search_cached":
+                result = asyncio.run(search_cached(
+                    tool_args.get('query_terms'),
+                    tool_args.get('limit', 5)
+                ))
+            elif tool_name == "search_arxiv":
                 result = asyncio.run(search_arxiv(
                     tool_args.get('query'),
                     tool_args.get('max_results', 10)
